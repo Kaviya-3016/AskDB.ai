@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database (Primary Application & Sandboxed Data)
+  postgres:
+    image: postgres:15-alpine
+    container_name: nlp_sql_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: nlp_sql_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nlp_sql_network
+
+  # Redis Cache (Model Inference & Session Cache)
+  redis:
+    image: redis:7-alpine
+    container_name: nlp_sql_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nlp_sql_network
+
+  # FastAPI Backend Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nlp_sql_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@postgres:5432/nlp_sql_db
+      - DEMO_DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@postgres:5432/nlp_sql_db
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_ENABLED=true
+      - SECRET_KEY=09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7
+      - RATE_LIMIT_PER_HOUR=100
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - nlp_sql_network
+
+  # React Frontend Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nlp_sql_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - nlp_sql_network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  nlp_sql_network:
+    driver: bridge
